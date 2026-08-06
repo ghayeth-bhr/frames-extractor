@@ -25,6 +25,7 @@ class Frame:
 class Candidate(Frame):
     reason: Literal["motion", "floor"]
     motion_score: float | None = None
+    similarity_score: float | None = None  # populated by stage 3; None from stages 1-2
 
     @classmethod
     def from_dict(cls, d: dict) -> "Candidate":
