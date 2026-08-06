@@ -34,9 +34,20 @@ class Candidate(Frame):
         return cls(**d)
 
 
+@dataclass(kw_only=True)
+class VerifiedFrame(Candidate):
+    verdict: Literal["yes", "no", "error"]  # "error" = local failure, not a real judgment
+    reasoning: str
+    confidence: float | None = None  # None when verdict == "error"
+
+
 def save_candidates(candidates: list[Candidate], path: Path) -> None:
     path.write_text(json.dumps([c.to_dict() for c in candidates], indent=2))
 
 
 def load_candidates(path: Path) -> list[Candidate]:
     return [Candidate.from_dict(d) for d in json.loads(path.read_text())]
+
+
+def load_verified_frames(path: Path) -> list[VerifiedFrame]:
+    return [VerifiedFrame.from_dict(d) for d in json.loads(path.read_text())]
