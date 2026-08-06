@@ -41,6 +41,12 @@ class VerifiedFrame(Candidate):
     confidence: float | None = None  # None when verdict == "error"
 
 
+@dataclass(kw_only=True)
+class ReviewDecision(VerifiedFrame):
+    decision: Literal["keep", "discard"]  # no "undecided" -- skipped/unreached
+    # frames simply get no entry at all
+
+
 def save_candidates(candidates: list[Candidate], path: Path) -> None:
     path.write_text(json.dumps([c.to_dict() for c in candidates], indent=2))
 
@@ -51,3 +57,7 @@ def load_candidates(path: Path) -> list[Candidate]:
 
 def load_verified_frames(path: Path) -> list[VerifiedFrame]:
     return [VerifiedFrame.from_dict(d) for d in json.loads(path.read_text())]
+
+
+def load_review_decisions(path: Path) -> list[ReviewDecision]:
+    return [ReviewDecision.from_dict(d) for d in json.loads(path.read_text())]

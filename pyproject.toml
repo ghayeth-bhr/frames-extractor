@@ -13,6 +13,9 @@ dependencies = [
     "requests>=2.31",
 ]
 
+[project.scripts]
+frames_extractor = "frames_extractor.cli:main"
+
 [dependency-groups]
 dev = [
     "pytest>=8.0",
