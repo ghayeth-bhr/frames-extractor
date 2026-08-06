@@ -87,6 +87,30 @@ def test_distinct_frames_never_merged(tmp_path: Path):
     assert len(kept) == len(images)
 
 
+def test_temporally_distant_near_duplicates_not_merged(tmp_path: Path):
+    in_dir = tmp_path / "stage1"
+    in_dir.mkdir()
+    base = _make_base_image()
+
+    # Sanity-check the premise: these really are near-duplicates in Hamming
+    # terms (identical resting-state background) -- the only reason they
+    # shouldn't merge is the time gap, not a lack of visual similarity.
+    assert (compute_phash(base) - compute_phash(base)) <= Stage2Config().hamming_threshold
+
+    path0 = io_utils.save_frame_image(base, in_dir, frame_index=0)
+    path1 = io_utils.save_frame_image(base, in_dir, frame_index=1)
+    candidates = [
+        Candidate(frame_index=0, timestamp_ms=0.0, image_path=path0, reason="floor"),
+        Candidate(frame_index=1, timestamp_ms=60_000.0, image_path=path1, reason="floor"),
+    ]
+    models.save_candidates(candidates, in_dir / "candidates.json")
+
+    out_dir = tmp_path / "stage2"
+    kept = dedup(in_dir, out_dir)
+
+    assert len(kept) == 2
+
+
 def test_phash_uses_correct_channel_order():
     # A single vertical two-tone split only varies horizontal frequency,
     # leaving most of pHash's 8x8 DCT block at zero either way (verified

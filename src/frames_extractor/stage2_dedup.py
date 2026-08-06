@@ -29,6 +29,7 @@ class Stage2Config:
     hamming_threshold: int = 8
     window_size: int = 5
     hash_size: int = 8  # imagehash.phash hash_size=8 -> 8x8 = 64-bit hash, per SPEC
+    max_window_ms: float = 5000.0  # ~one default floor-sample interval; bounds "temporally local"
 
 
 def compute_phash(image: np.ndarray, hash_size: int = 8) -> imagehash.ImageHash:
@@ -51,19 +52,23 @@ def dedup(in_dir: Path, out_dir: Path, config: Stage2Config | None = None) -> li
     )
 
     kept: list[Candidate] = []
-    window: deque[imagehash.ImageHash] = deque(maxlen=config.window_size)
+    window: deque[tuple[float, imagehash.ImageHash]] = deque(maxlen=config.window_size)
 
     for candidate in candidates:
         image = io_utils.load_frame_image(candidate.image_path)
         phash = compute_phash(image, hash_size=config.hash_size)
 
-        if any(phash - h <= config.hamming_threshold for h in window):
-            continue  # near-duplicate of a recently-kept frame
+        cutoff_ms = candidate.timestamp_ms - config.max_window_ms
+        is_duplicate = any(
+            phash - h <= config.hamming_threshold for ts, h in window if ts >= cutoff_ms
+        )
+        if is_duplicate:
+            continue  # near-duplicate of a recently-kept, temporally-local frame
 
         dest_path = out_dir / candidate.image_path.name
         shutil.copy2(candidate.image_path, dest_path)
         kept.append(dataclasses.replace(candidate, image_path=dest_path))
-        window.append(phash)
+        window.append((candidate.timestamp_ms, phash))
 
     models.save_candidates(kept, out_dir / "candidates.json")
     return kept
