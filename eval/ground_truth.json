@@ -1,0 +1,8 @@
+[
+  {"start_ts": 46000, "end_ts": 47000, "description": "a man leaves the coffee shop"},
+  {"start_ts": 92000, "end_ts": 94000, "description": "a woman leaves the coffee shop"},
+  {"start_ts": 156000, "end_ts": 159000, "description": "a man leaves the coffee shop"},
+  {"start_ts": 174000, "end_ts": 176000, "description": "a man leaves the coffee shop"},
+  {"start_ts": 183000, "end_ts": 185000, "description": "two men leave the coffee shop"},
+  {"start_ts": 399000, "end_ts": 401000, "description": "a man enters the coffee shop"}
+]

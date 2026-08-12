@@ -5,6 +5,7 @@ GPU, or Ollama call is ever spawned by this file.
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -22,6 +23,35 @@ def test_parse_extract():
     assert args.command == "extract"
     assert args.video == Path("clip.mp4")
     assert args.out == Path("out1")
+    assert args.mask_regions is None  # default: not specified (distinct from explicit [])
+    assert args.auto_mask is False
+
+
+def test_parse_extract_mask_regions():
+    args = cli.build_parser().parse_args(
+        ["extract", "--video", "clip.mp4", "--out", "out1", "--mask-regions", "0,60,750,75"]
+    )
+    assert args.mask_regions == [(0, 60, 750, 75)]
+
+
+def test_parse_extract_multiple_mask_regions():
+    args = cli.build_parser().parse_args(
+        ["extract", "--video", "clip.mp4", "--out", "out1", "--mask-regions", "0,60,750,75", "800,0,200,50"]
+    )
+    assert args.mask_regions == [(0, 60, 750, 75), (800, 0, 200, 50)]
+
+
+def test_parse_extract_invalid_mask_region_raises_system_exit():
+    with pytest.raises(SystemExit):
+        cli.build_parser().parse_args(
+            ["extract", "--video", "clip.mp4", "--out", "out1", "--mask-regions", "not-valid"]
+        )
+
+
+def test_parse_extract_auto_mask():
+    args = cli.build_parser().parse_args(["extract", "--video", "clip.mp4", "--out", "out1", "--auto-mask"])
+    assert args.auto_mask is True
+    assert args.mask_regions is None
 
 
 def test_parse_dedup_uses_in_dir_dest():
@@ -68,6 +98,23 @@ def test_parse_run():
     assert args.video == Path("clip.mp4")
     assert args.query == "a cat"
     assert args.out == Path("output1")
+    assert args.mask_regions is None
+    assert args.auto_mask is False
+
+
+def test_parse_run_mask_regions():
+    args = cli.build_parser().parse_args(
+        ["run", "--video", "clip.mp4", "--query", "a cat", "--out", "output1", "--mask-regions", "0,60,750,75"]
+    )
+    assert args.mask_regions == [(0, 60, 750, 75)]
+
+
+def test_parse_run_auto_mask():
+    args = cli.build_parser().parse_args(
+        ["run", "--video", "clip.mp4", "--query", "a cat", "--out", "output1", "--auto-mask"]
+    )
+    assert args.auto_mask is True
+    assert args.mask_regions is None
 
 
 def test_parse_missing_required_flag_raises_system_exit():
@@ -81,7 +128,31 @@ def test_parse_missing_required_flag_raises_system_exit():
 def test_main_dispatches_extract():
     with patch("frames_extractor.cli.stage1_extract.extract") as mock_extract:
         cli.main(["extract", "--video", "clip.mp4", "--out", "out1"])
-    mock_extract.assert_called_once_with(Path("clip.mp4"), Path("out1"))
+    mock_extract.assert_called_once()
+    call_args = mock_extract.call_args[0]
+    assert call_args[0] == Path("clip.mp4")
+    assert call_args[1] == Path("out1")
+    assert call_args[2].mask_regions is None
+    assert call_args[2].run_auto_detect is False
+
+
+def test_main_dispatches_extract_with_mask_regions():
+    with patch("frames_extractor.cli.stage1_extract.extract") as mock_extract:
+        cli.main(["extract", "--video", "clip.mp4", "--out", "out1", "--mask-regions", "0,60,750,75"])
+    mock_extract.assert_called_once()
+    call_args = mock_extract.call_args[0]
+    assert call_args[0] == Path("clip.mp4")
+    assert call_args[1] == Path("out1")
+    assert call_args[2].mask_regions == [(0, 60, 750, 75)]
+
+
+def test_main_dispatches_extract_with_auto_mask():
+    with patch("frames_extractor.cli.stage1_extract.extract") as mock_extract:
+        cli.main(["extract", "--video", "clip.mp4", "--out", "out1", "--auto-mask"])
+    mock_extract.assert_called_once()
+    call_args = mock_extract.call_args[0]
+    assert call_args[2].mask_regions is None
+    assert call_args[2].run_auto_detect is True
 
 
 def test_main_dispatches_dedup():
@@ -111,7 +182,21 @@ def test_main_dispatches_review():
 def test_main_dispatches_run():
     with patch("frames_extractor.cli._run_pipeline") as mock_run:
         cli.main(["run", "--video", "clip.mp4", "--query", "a cat", "--out", "output1"])
-    mock_run.assert_called_once_with(Path("clip.mp4"), "a cat", Path("output1"))
+    mock_run.assert_called_once_with(Path("clip.mp4"), "a cat", Path("output1"), None, False)
+
+
+def test_main_dispatches_run_with_mask_regions():
+    with patch("frames_extractor.cli._run_pipeline") as mock_run:
+        cli.main(
+            ["run", "--video", "clip.mp4", "--query", "a cat", "--out", "output1", "--mask-regions", "0,60,750,75"]
+        )
+    mock_run.assert_called_once_with(Path("clip.mp4"), "a cat", Path("output1"), [(0, 60, 750, 75)], False)
+
+
+def test_main_dispatches_run_with_auto_mask():
+    with patch("frames_extractor.cli._run_pipeline") as mock_run:
+        cli.main(["run", "--video", "clip.mp4", "--query", "a cat", "--out", "output1", "--auto-mask"])
+    mock_run.assert_called_once_with(Path("clip.mp4"), "a cat", Path("output1"), None, True)
 
 
 def test_main_dispatches_export():
@@ -174,12 +259,24 @@ def _fake_decisions(count: int, out_dir: Path, decisions: list[str]) -> list[Rev
     return items
 
 
-def _parse_cmd_flags(cmd: list[str]) -> dict[str, str]:
-    flags: dict[str, str] = {}
-    args = iter(cmd[4:])  # skip [sys.executable, "-m", "frames_extractor", subcommand]
-    for token in args:
+def _parse_cmd_flags(cmd: list[str]) -> dict[str, str | bool]:
+    flags: dict[str, str | bool] = {}
+    tokens = cmd[4:]  # skip [sys.executable, "-m", "frames_extractor", subcommand]
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
         if token.startswith("--"):
-            flags[token[2:]] = next(args)
+            # Boolean flags (e.g. --auto-mask) take no value -- distinguish
+            # from a value-taking flag by checking whether the next token is
+            # itself a flag (or there is no next token at all).
+            if i + 1 < len(tokens) and not tokens[i + 1].startswith("--"):
+                flags[token[2:]] = tokens[i + 1]
+                i += 2
+            else:
+                flags[token[2:]] = True
+                i += 1
+        else:
+            i += 1
     return flags
 
 
@@ -231,6 +328,63 @@ def test_run_pipeline_orchestrates_all_stages_in_order(tmp_path: Path, monkeypat
     assert _parse_cmd_flags(calls_log[5])["out"] == str(out_dir)  # export writes to the real --out
 
 
+def test_run_pipeline_passes_mask_regions_to_extract_subprocess(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.chdir(tmp_path)
+    video_path = tmp_path / "clip.mp4"
+    video_path.write_bytes(b"fake video")
+    out_dir = tmp_path / "data" / "output" / "run1"
+
+    calls_log: list[list[str]] = []
+    with patch("frames_extractor.cli.subprocess.run", side_effect=_make_subprocess_side_effect(calls_log)):
+        cli._run_pipeline(video_path, "a cat", out_dir, mask_regions=[(0, 60, 750, 75)])
+
+    extract_cmd = calls_log[0]
+    assert "--mask-regions" in extract_cmd
+    idx = extract_cmd.index("--mask-regions")
+    assert extract_cmd[idx + 1] == "0,60,750,75"
+
+
+def test_run_pipeline_no_mask_regions_flag_when_none_given(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.chdir(tmp_path)
+    video_path = tmp_path / "clip.mp4"
+    video_path.write_bytes(b"fake video")
+    out_dir = tmp_path / "data" / "output" / "run1"
+
+    calls_log: list[list[str]] = []
+    with patch("frames_extractor.cli.subprocess.run", side_effect=_make_subprocess_side_effect(calls_log)):
+        cli._run_pipeline(video_path, "a cat", out_dir)
+
+    assert "--mask-regions" not in calls_log[0]
+
+
+def test_run_pipeline_passes_auto_mask_flag_to_extract_subprocess(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.chdir(tmp_path)
+    video_path = tmp_path / "clip.mp4"
+    video_path.write_bytes(b"fake video")
+    out_dir = tmp_path / "data" / "output" / "run1"
+
+    calls_log: list[list[str]] = []
+    with patch("frames_extractor.cli.subprocess.run", side_effect=_make_subprocess_side_effect(calls_log)):
+        cli._run_pipeline(video_path, "a cat", out_dir, auto_mask=True)
+
+    assert "--auto-mask" in calls_log[0]
+
+
+def test_run_pipeline_no_auto_mask_flag_when_false(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.chdir(tmp_path)
+    video_path = tmp_path / "clip.mp4"
+    video_path.write_bytes(b"fake video")
+    out_dir = tmp_path / "data" / "output" / "run1"
+
+    calls_log: list[list[str]] = []
+    with patch("frames_extractor.cli.subprocess.run", side_effect=_make_subprocess_side_effect(calls_log)):
+        cli._run_pipeline(video_path, "a cat", out_dir)
+
+    assert "--auto-mask" not in calls_log[0]
+
+
 def test_run_pipeline_prints_funnel_counts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ):
@@ -250,6 +404,47 @@ def test_run_pipeline_prints_funnel_counts(
     assert "stage 5 done: 1 kept, 0 discarded" in out
     assert "[run] export -- writing final output to" in out
     assert "stage 6" not in out  # export is not a numbered stage
+
+
+def test_run_pipeline_writes_timing_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.chdir(tmp_path)
+    video_path = tmp_path / "clip.mp4"
+    video_path.write_bytes(b"fake video")
+    out_dir = tmp_path / "data" / "output" / "run1"
+
+    with patch("frames_extractor.cli.subprocess.run", side_effect=_make_subprocess_side_effect([])):
+        cli._run_pipeline(video_path, "a cat", out_dir)
+
+    timing_path = Path("data") / "work" / "run1" / "timing.json"
+    assert timing_path.exists()
+    timing = json.loads(timing_path.read_text())
+    assert set(timing.keys()) == {"stage1", "stage2", "stage3", "stage4", "stage5"}
+    assert all(isinstance(v, (int, float)) and v >= 0 for v in timing.values())
+
+
+def test_run_pipeline_timing_json_survives_partial_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.chdir(tmp_path)
+    video_path = tmp_path / "clip.mp4"
+    video_path.write_bytes(b"fake video")
+    out_dir = tmp_path / "data" / "output" / "run1"
+
+    def failing_side_effect(cmd, check=True):
+        subcommand = cmd[3]
+        flags = _parse_cmd_flags(cmd)
+        if subcommand == "extract":
+            out_dir_arg = Path(flags["out"])
+            models.save_candidates(_fake_candidates(3, out_dir_arg), out_dir_arg / "candidates.json")
+            return MagicMock(returncode=0)
+        raise subprocess.CalledProcessError(1, cmd)
+
+    with patch("frames_extractor.cli.subprocess.run", side_effect=failing_side_effect):
+        with pytest.raises(subprocess.CalledProcessError):
+            cli._run_pipeline(video_path, "a cat", out_dir)
+
+    timing_path = Path("data") / "work" / "run1" / "timing.json"
+    assert timing_path.exists()
+    timing = json.loads(timing_path.read_text())
+    assert set(timing.keys()) == {"stage1"}  # only the completed stage's timing survives
 
 
 def test_run_pipeline_stops_on_subprocess_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

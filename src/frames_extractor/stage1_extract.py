@@ -6,7 +6,7 @@ guarantees output even for a clip with no detected motion (see SPEC.md).
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 import cv2
@@ -23,7 +23,8 @@ class Stage1Config:
     mog2_learning_rate: float = 0.001
     motion_area_ratio_threshold: float = 0.001
     floor_interval_sec: float = 5.0
-    mask_regions: list[tuple[int, int, int, int]] = field(default_factory=list)
+    mask_regions: list[tuple[int, int, int, int]] | None = None  # None = not specified
+    run_auto_detect: bool = False  # opt-in: auto-detect only runs if True AND mask_regions is None
 
 
 def apply_masks(image: np.ndarray, mask_regions: list[tuple[int, int, int, int]]) -> np.ndarray:
@@ -38,8 +39,103 @@ def apply_masks(image: np.ndarray, mask_regions: list[tuple[int, int, int, int]]
     return masked
 
 
+def detect_overlay_regions(
+    video_path: Path,
+    sample_interval_sec: float = 1.0,
+    diff_threshold: int = 25,
+    fraction_threshold: float = 0.8,
+    min_area: int = 20,
+    max_scan_sec: float = 300.0,
+) -> list[tuple[int, int, int, int]]:
+    """Auto-detects a burned-in ticking timestamp/clock overlay by sampling
+    frames spread across the video via seeking (cheap pre-pass, not a full
+    sequential decode), diffing consecutive samples, and finding regions
+    that changed on >= fraction_threshold of sampled transitions.
+
+    A real ticking overlay changes on nearly every 1-second sample for as
+    long as it's on screen; real scene motion is transient and moves, so it
+    doesn't accumulate that consistently in one fixed spot. Validated
+    against a real Absar clip and synthetic fixtures: on the real clip this
+    only finds the fastest-ticking sub-component (e.g. seconds digits, not
+    the whole visible timestamp text) -- confirmed this is correct, not a
+    tuning gap (no threshold safely captures the whole text without also
+    catching real scene motion), and confirmed masking just that
+    sub-region is exactly as effective as masking the whole visible overlay
+    (a static remainder can't cause false motion regardless of masking,
+    since MOG2 only reacts to change). See SPEC.md / the approved plan for
+    the full validation writeup.
+
+    Scans at most the first `max_scan_sec` of video, not the whole clip --
+    a real overlay's behavior doesn't change over time, so scanning a
+    bounded prefix is just as reliable and keeps the cost bounded for
+    SPEC's 60-minute upper bound (measured ~114s for a full 7-minute scan
+    at these defaults; uncapped, a 60-minute clip would scale to several
+    minutes just for this pre-pass).
+
+    Returns [] if the video is empty or nothing crosses the threshold --
+    never forces a false positive.
+    """
+    cap = io_utils.open_video(video_path)
+    try:
+        metadata = io_utils.get_video_metadata(cap)
+        if metadata.fps <= 0 or metadata.frame_count <= 0:
+            return []
+
+        frame_step = max(1, int(round(metadata.fps * sample_interval_sec)))
+        max_frame = min(metadata.frame_count, int(metadata.fps * max_scan_sec))
+        sample_indices = range(0, max_frame, frame_step)
+
+        prev_gray: np.ndarray | None = None
+        change_accumulator: np.ndarray | None = None
+        n_pairs = 0
+
+        for idx in sample_indices:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+            ok, frame = cap.read()
+            if not ok:
+                continue
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            if prev_gray is not None:
+                diff = cv2.absdiff(gray, prev_gray)
+                changed = (diff > diff_threshold).astype(np.uint8)
+                if change_accumulator is None:
+                    change_accumulator = np.zeros_like(changed, dtype=np.float64)
+                change_accumulator += changed
+                n_pairs += 1
+            prev_gray = gray
+    finally:
+        cap.release()
+
+    if n_pairs == 0 or change_accumulator is None:
+        return []
+
+    fraction_changed = change_accumulator / n_pairs
+    mask = (fraction_changed >= fraction_threshold).astype(np.uint8) * 255
+
+    num_labels, _labels, stats, _centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    regions: list[tuple[int, int, int, int]] = []
+    for label in range(1, num_labels):  # label 0 is the background
+        x, y, w, h, area = stats[label]
+        if area >= min_area:
+            regions.append((int(x), int(y), int(w), int(h)))
+    return regions
+
+
 def extract(video_path: Path, out_dir: Path, config: Stage1Config | None = None) -> list[Candidate]:
     config = config or Stage1Config()
+
+    if config.mask_regions is not None:
+        mask_regions = config.mask_regions  # explicit always wins, regardless of run_auto_detect
+    elif config.run_auto_detect:
+        detected = detect_overlay_regions(video_path)
+        if detected:
+            print(f"[extract] auto-detected {len(detected)} mask region(s): {detected}")
+        else:
+            print("[extract] auto-detection found no overlay region")
+        mask_regions = detected
+    else:
+        mask_regions = []  # today's default, unchanged: no masking, no auto-detect
+
     out_dir.mkdir(parents=True, exist_ok=True)
     cap = io_utils.open_video(video_path)
     morph_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
@@ -62,7 +158,7 @@ def extract(video_path: Path, out_dir: Path, config: Stage1Config | None = None)
             last_timestamp_ms = decoded.timestamp_ms
             height, width = decoded.image.shape[:2]
 
-            masked = apply_masks(decoded.image, config.mask_regions)
+            masked = apply_masks(decoded.image, mask_regions)
             fg_mask = bg_subtractor.apply(masked, learningRate=config.mog2_learning_rate)
             # MOG2 shadow pixels are 127 (with detectShadows=True); drop them
             # before counting so shadow flicker can't inflate the motion score.
