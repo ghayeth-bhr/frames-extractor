@@ -12,9 +12,9 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from frames_extractor import io_utils, models, stage1_extract
-from frames_extractor.models import Candidate
-from frames_extractor.stage2_dedup import Stage2Config, compute_phash, dedup
+from backend import io_utils, models, stage1_extract
+from backend.models import Candidate
+from backend.stage2_dedup import Stage2Config, compute_phash, dedup
 from video_utils import make_synthetic_video
 
 

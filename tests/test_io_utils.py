@@ -14,7 +14,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from frames_extractor import io_utils
+from backend import io_utils
 from video_utils import make_synthetic_video
 
 FPS = 20.0
@@ -70,7 +70,7 @@ def test_check_duration_sanity_warns_on_mismatch(caplog: pytest.LogCaptureFixtur
         fps=20.0, frame_count=200, width=160, height=120, nominal_duration_sec=10.0
     )
 
-    with caplog.at_level(logging.WARNING, logger="frames_extractor.io_utils"):
+    with caplog.at_level(logging.WARNING, logger="backend.io_utils"):
         io_utils.check_duration_sanity(metadata, frames_decoded=200, last_timestamp_ms=2000.0)
 
     assert any("duration mismatch" in r.message.lower() for r in caplog.records)
@@ -81,7 +81,7 @@ def test_check_duration_sanity_silent_when_consistent(caplog: pytest.LogCaptureF
         fps=20.0, frame_count=200, width=160, height=120, nominal_duration_sec=10.0
     )
 
-    with caplog.at_level(logging.WARNING, logger="frames_extractor.io_utils"):
+    with caplog.at_level(logging.WARNING, logger="backend.io_utils"):
         io_utils.check_duration_sanity(metadata, frames_decoded=200, last_timestamp_ms=9950.0)
 
     assert not any("duration mismatch" in r.message.lower() for r in caplog.records)

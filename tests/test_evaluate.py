@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from evaluate import DEFAULT_TOLERANCE_MS, evaluate, load_ground_truth
-from frames_extractor import models
+from backend import models
 
 WORK_DIR = Path("data/work/run1")
 GROUND_TRUTH_PATH = Path("eval/ground_truth.json")

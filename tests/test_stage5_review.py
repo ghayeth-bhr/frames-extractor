@@ -14,10 +14,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from frames_extractor import io_utils, models, stage1_extract, stage2_dedup, stage3_rank, stage4_verify, stage5_review
-from frames_extractor.models import ReviewDecision, VerifiedFrame
-from frames_extractor.stage3_rank import Stage3Config
-from frames_extractor.stage5_review import _action_for_key, _draw_overlay, _run_review_loop
+from backend import io_utils, models, stage1_extract, stage2_dedup, stage3_rank, stage4_verify, stage5_review
+from backend.models import ReviewDecision, VerifiedFrame
+from backend.stage3_rank import Stage3Config
+from backend.stage5_review import _action_for_key, _draw_overlay, _run_review_loop
 from video_utils import make_synthetic_video
 
 QUERY = "a white rectangle on a gray background"
@@ -85,6 +85,21 @@ def test_draw_overlay_none_confidence_does_not_crash():
         reason="floor",
         verdict="error",
         reasoning="ConnectionError: could not reach server",
+        confidence=None,
+    )
+    annotated = _draw_overlay(image, QUERY, candidate)
+    assert annotated.shape == image.shape
+
+
+def test_draw_overlay_skipped_verdict_does_not_crash():
+    image = _make_image()
+    candidate = VerifiedFrame(
+        frame_index=0,
+        timestamp_ms=0.0,
+        image_path=Path("dummy.jpg"),
+        reason="floor",
+        verdict="skipped",
+        reasoning="VLM stage skipped by user config (--skip-vlm)",
         confidence=None,
     )
     annotated = _draw_overlay(image, QUERY, candidate)

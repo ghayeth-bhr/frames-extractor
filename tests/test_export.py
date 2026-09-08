@@ -8,9 +8,9 @@ from pathlib import Path
 
 import numpy as np
 
-from frames_extractor import io_utils, models
-from frames_extractor.export import export
-from frames_extractor.models import ReviewDecision
+from backend import io_utils, models
+from backend.export import export
+from backend.models import ReviewDecision
 
 
 def _make_image(width: int = 160, height: int = 120) -> np.ndarray:

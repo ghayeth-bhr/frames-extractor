@@ -17,10 +17,10 @@ import cv2
 import numpy as np
 import pytest
 
-from frames_extractor import io_utils, models, stage1_extract, stage2_dedup, stage3_rank, stage4_verify
-from frames_extractor.models import Candidate
-from frames_extractor.stage3_rank import Stage3Config
-from frames_extractor.stage4_verify import Stage4Config
+from backend import io_utils, models, stage1_extract, stage2_dedup, stage3_rank, stage4_verify
+from backend.models import Candidate
+from backend.stage3_rank import Stage3Config
+from backend.stage4_verify import Stage4Config
 from video_utils import make_synthetic_video
 
 QUERY = "a white rectangle on a gray background"
@@ -187,7 +187,7 @@ def test_resumability_only_retries_errored_frames(tmp_path: Path):
 
     first_run_side_effect.calls = 0
 
-    with patch("frames_extractor.stage4_verify._verify_frame", side_effect=first_run_side_effect) as mock1:
+    with patch("backend.stage4_verify._verify_frame", side_effect=first_run_side_effect) as mock1:
         result1 = stage4_verify.verify(in_dir, out_dir, QUERY)
 
     assert mock1.call_count == 5
@@ -197,7 +197,7 @@ def test_resumability_only_retries_errored_frames(tmp_path: Path):
     def second_run_side_effect(image, query, config):
         return ("yes", "retried successfully", 0.9)
 
-    with patch("frames_extractor.stage4_verify._verify_frame", side_effect=second_run_side_effect) as mock2:
+    with patch("backend.stage4_verify._verify_frame", side_effect=second_run_side_effect) as mock2:
         result2 = stage4_verify.verify(in_dir, out_dir, QUERY)
 
     assert mock2.call_count == 2  # only frames 3 and 4 (previously "error") retried
@@ -218,7 +218,7 @@ def _fake_response(content: str) -> MagicMock:
 
 def test_verify_frame_handles_null_confidence_without_raising():
     fake = _fake_response('{"verdict": "yes", "reasoning": "ok", "confidence": null}')
-    with patch("frames_extractor.stage4_verify.requests.post", return_value=fake):
+    with patch("backend.stage4_verify.requests.post", return_value=fake):
         verdict, reasoning, confidence = stage4_verify._verify_frame(
             _make_match_image(), QUERY, Stage4Config()
         )
@@ -228,7 +228,7 @@ def test_verify_frame_handles_null_confidence_without_raising():
 
 def test_verify_frame_handles_array_content_without_raising():
     fake = _fake_response("[1, 2, 3]")
-    with patch("frames_extractor.stage4_verify.requests.post", return_value=fake):
+    with patch("backend.stage4_verify.requests.post", return_value=fake):
         verdict, reasoning, confidence = stage4_verify._verify_frame(
             _make_match_image(), QUERY, Stage4Config()
         )

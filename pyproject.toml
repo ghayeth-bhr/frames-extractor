@@ -11,14 +11,18 @@ dependencies = [
     "transformers==5.14.1",
     "accelerate==1.14.0",
     "requests>=2.31",
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "python-multipart>=0.0.9",
 ]
 
 [project.scripts]
-frames_extractor = "frames_extractor.cli:main"
+frames_extractor = "backend.cli:main"
 
 [dependency-groups]
 dev = [
     "pytest>=8.0",
+    "httpx>=0.27",
 ]
 
 [tool.pytest.ini_options]
@@ -29,7 +33,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/frames_extractor"]
+packages = ["src/backend", "src/vectordb", "src/frontend"]
 
 [tool.uv.sources]
 torch = { index = "pytorch-cu124" }

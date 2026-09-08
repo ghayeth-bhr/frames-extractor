@@ -38,18 +38,28 @@ technical justification behind each):
 frames-extractor/
   pyproject.toml
   SPEC.md
-  src/frames_extractor/
-    __init__.py
-    cli.py              # entrypoints: extract, dedup, rank, verify, review, export, run (chains all)
-    config.py           # dataclass of all tunable thresholds/paths, defaults biased toward recall
-    models.py            # shared dataclasses: Frame, Candidate, VerifiedFrame, ReviewDecision
-    io_utils.py           # video reading (cv2.VideoCapture), frame save/load, timestamp helpers (per-frame CAP_PROP_POS_MSEC, not index/fps)
-    stage1_extract.py     # MOG2 motion detection + fixed-interval floor sampling
-    stage2_dedup.py        # imagehash phash, Hamming distance, temporal-window comparison
-    stage3_rank.py          # SigLIP2 embeddings, cosine similarity vs text query, top-K shortlist
-    stage4_verify.py        # Claude Haiku vision call per shortlisted frame, yes/no + reasoning + confidence
-    stage5_review.py         # OpenCV keyboard review UI, resumable JSON manifest of decisions
-    export.py                 # writes images/ + _annotations.coco.json in Roboflow-importable layout
+  src/
+    backend/                    # the core CLI pipeline (this section's original scope)
+      __init__.py
+      cli.py              # entrypoints: extract, dedup, rank, verify, review, export, run (chains all),
+                            # plus index/search/search-index/add-to-index (see vectordb/, frontend/)
+      config.py           # dataclass of all tunable thresholds/paths, defaults biased toward recall
+      models.py            # shared dataclasses: Frame, Candidate, VerifiedFrame, ReviewDecision, IndexedFrame
+      io_utils.py           # video reading (cv2.VideoCapture), frame save/load, timestamp helpers (per-frame CAP_PROP_POS_MSEC, not index/fps)
+      stage1_extract.py     # MOG2 motion detection + fixed-interval floor sampling
+      stage2_dedup.py        # imagehash phash, Hamming distance, temporal-window comparison
+      stage3_rank.py          # SigLIP2 embeddings, cosine similarity vs text query, top-K shortlist
+      stage4_verify.py        # Claude Haiku vision call per shortlisted frame, yes/no + reasoning + confidence
+      stage5_review.py         # OpenCV keyboard review UI, resumable JSON manifest of decisions
+      export.py                 # writes images/ + _annotations.coco.json in Roboflow-importable layout
+    vectordb/                    # appendable multi-source embedding/index storage (plain files today --
+      __init__.py                # candidates.json + embeddings.npy, NOT a real vector DB server)
+      multi_source_index.py        # add_to_index, search_multi_source_index -- backs the webapp's "assets"
+    frontend/                    # FastAPI web application layer (asset/source management + API)
+      __init__.py
+      app.py                       # FastAPI routes
+      storage.py                    # asset/source meta.json persistence
+      worker.py                      # single-worker GPU-job lane (serializes embedding + search)
   eval/
     ground_truth.json          # manually authored answer key for the sample Absar clip
     evaluate.py                 # scores pipeline output against ground_truth.json
@@ -57,7 +67,12 @@ frames-extractor/
     raw/                          # input videos
     work/<run_id>/                # intermediate per-stage output (for debugging each stage independently)
     output/<run_id>/               # final export folder
+    assets/<asset_id>/             # webapp multi-source assets (meta.json, sources/, index/)
 ```
+
+(`backend`, `vectordb`, `frontend` are three top-level Python packages built from one `pyproject.toml`/one venv --
+not separately-versioned installable packages. The `frames_extractor` CLI command name is unchanged; it now
+points at `backend.cli:main` instead of `frames_extractor.cli:main`.)
 
 ### CLI shape
 

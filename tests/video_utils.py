@@ -55,7 +55,11 @@ def make_synthetic_video(
         raise IOError(f"Could not open VideoWriter for {path}")
 
     rect_w, rect_h = 20, 20
-    clock_size = 10
+    # 15x15=225px gives a ~2x margin above Stage1Config's default
+    # min_blob_area_ratio=0.0054 (~104px at this 160x120/19200px frame area) --
+    # big enough that masking, not the blob-area gate, is what suppresses this
+    # fixture's false motion in tests that assert masking matters.
+    clock_size = 15
 
     try:
         for frame_index in range(total_frames):

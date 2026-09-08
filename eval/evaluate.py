@@ -15,7 +15,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from frames_extractor import io_utils, models
+from backend import io_utils, models
 
 # Tolerance around each ground-truth event's [start_ts, end_ts] window used
 # to match a kept frame's timestamp_ms. Named, not a magic number, since it

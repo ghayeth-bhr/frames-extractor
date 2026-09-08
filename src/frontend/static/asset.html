@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Asset -- frames-extractor</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="container">
+  <p><a href="/">&larr; All assets</a></p>
+  <h1 id="asset-name">Loading...</h1>
+
+  <div class="panel">
+    <h2>Upload a video</h2>
+    <form id="upload-form">
+      <div class="field">
+        <label for="video-file">Video file</label>
+        <input type="file" id="video-file" name="file" accept="video/*" required>
+      </div>
+      <details>
+        <summary>Advanced options (production-speed knobs -- leave blank for defaults)</summary>
+        <div class="advanced-grid">
+          <div class="field">
+            <label for="opt-downscale">Downscale factor</label>
+            <input type="number" id="opt-downscale" step="0.05" min="0" max="1" placeholder="1.0 (off)">
+          </div>
+          <div class="field">
+            <label for="opt-area-ratio">Min event area ratio</label>
+            <input type="number" id="opt-area-ratio" step="0.0001" min="0" placeholder="0.0054">
+          </div>
+          <div class="field">
+            <label for="opt-auto-mask"><input type="checkbox" id="opt-auto-mask" style="width:auto;"> Auto-mask overlay</label>
+          </div>
+          <div class="field">
+            <label for="opt-cross-source-dedup" title="Skip embedding frames that visually duplicate a frame already indexed from another source in this asset -- use when uploading overlapping/re-recorded footage."><input type="checkbox" id="opt-cross-source-dedup" style="width:auto;"> Cross-source dedup</label>
+          </div>
+          <div class="field">
+            <label for="opt-hamming">Dedup hamming threshold</label>
+            <input type="number" id="opt-hamming" step="1" min="0" placeholder="8">
+          </div>
+          <div class="field">
+            <label for="opt-window">Dedup window size</label>
+            <input type="number" id="opt-window" step="1" min="1" placeholder="5">
+          </div>
+        </div>
+      </details>
+      <div style="margin-top:14px;">
+        <button type="submit" id="upload-submit">Upload</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="panel">
+    <h2>Sources</h2>
+    <ul class="source-list" id="source-list"></ul>
+    <div class="empty-state" id="source-empty" style="display:none;">No sources uploaded yet.</div>
+  </div>
+
+  <div class="panel">
+    <div class="search-bar">
+      <div class="field">
+        <label for="search-query">Search</label>
+        <input type="text" id="search-query" placeholder="e.g. a person entering through the door">
+      </div>
+      <div class="field topk">
+        <label for="search-topk">Top K</label>
+        <input type="number" id="search-topk" value="20" min="1" max="200">
+      </div>
+      <button id="search-submit">Search</button>
+      <button id="search-clear" class="secondary" style="display:none;">Clear</button>
+    </div>
+
+    <div class="view-header">
+      <h2 id="view-title" style="margin:0;">Gallery</h2>
+      <div class="selection-bar">
+        <label class="select-all-label"><input type="checkbox" id="select-all"> Select all</label>
+        <button class="secondary" id="download-selected" disabled>Download selected (0)</button>
+      </div>
+    </div>
+    <div class="gallery" id="gallery"></div>
+    <div class="empty-state" id="gallery-empty" style="display:none;">No frames yet.</div>
+    <div class="pagination" id="pagination"></div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-overlay">
+  <div class="modal-content">
+    <div class="modal-close-row">
+      <span class="modal-counter" id="modal-counter"></span>
+      <button class="secondary" id="modal-close">Close</button>
+    </div>
+    <div class="modal-image-wrap">
+      <button class="modal-nav modal-nav-prev" id="modal-prev" aria-label="Previous frame">&larr;</button>
+      <img id="modal-image" src="" alt="frame">
+      <button class="modal-nav modal-nav-next" id="modal-next" aria-label="Next frame">&rarr;</button>
+    </div>
+    <div class="modal-meta" id="modal-meta"></div>
+  </div>
+</div>
+
+<script src="/static/asset.js"></script>
+</body>
+</html>

@@ -86,15 +86,27 @@ def _embed_images(images: list[np.ndarray], model, processor, batch_size: int) -
         return torch.cat(batches, dim=0)
 
 
+def _embed_candidate_images(
+    candidates: list[Candidate], model, processor, batch_size: int
+) -> np.ndarray:
+    """Query-independent: embeds every candidate's image and returns an
+    L2-normalized (N, D) float32 numpy array, row-aligned to `candidates` in
+    the given order. Shared by rank() (embed-then-immediately-rank) and
+    build_index() (embed-then-persist-for-later-ranking) -- exactly one
+    image-embedding code path for both."""
+    images = [io_utils.load_frame_image(c.image_path) for c in candidates]
+    embeds = _embed_images(images, model, processor, batch_size)
+    return embeds.float().cpu().numpy()
+
+
 def _rank_candidates(
     candidates: list[Candidate], query: str, model, processor, config: Stage3Config
 ) -> list[tuple[Candidate, float]]:
     """Pure ranking logic, no I/O side effects -- returns ALL candidates paired
     with their score, sorted descending. Truncation to top_k happens in rank()."""
-    images = [io_utils.load_frame_image(c.image_path) for c in candidates]
-    query_embed = _embed_query(query, model, processor)
-    image_embeds = _embed_images(images, model, processor, config.batch_size)
-    sims = (image_embeds.float() @ query_embed.float().T).squeeze(-1).cpu().numpy()
+    query_embed = _embed_query(query, model, processor).float().cpu().numpy()
+    image_embeds = _embed_candidate_images(candidates, model, processor, config.batch_size)
+    sims = (image_embeds @ query_embed.T).reshape(-1)
     return sorted(zip(candidates, sims.tolist()), key=lambda pair: pair[1], reverse=True)
 
 
@@ -111,6 +123,86 @@ def rank(in_dir: Path, out_dir: Path, query: str, config: Stage3Config | None = 
 
     model, processor = _load_model(config.checkpoint_id)
     ranked = _rank_candidates(candidates, query, model, processor, config)
+
+    kept: list[Candidate] = []
+    for candidate, score in ranked[: config.top_k]:
+        dest_path = out_dir / candidate.image_path.name
+        shutil.copy2(candidate.image_path, dest_path)
+        kept.append(dataclasses.replace(candidate, image_path=dest_path, similarity_score=score))
+
+    models.save_candidates(kept, out_dir / "candidates.json")
+    return kept
+
+
+def build_index(dedup_dir: Path, config: Stage3Config | None = None) -> None:
+    """Query-independent half of stage 3, for "build once, search many times":
+    embeds every candidate already sitting in dedup_dir (stage 2's own output
+    directory -- no separate copy, the images are already there) and writes
+    embeddings.npy as a sidecar next to its existing candidates.json. No
+    query, no top_k truncation (which candidates matter depends on a query
+    that doesn't exist yet). A later search_index() call re-ranks this cached
+    matrix against a real query without re-embedding a single image or
+    re-running stage 1/2.
+    """
+    config = config or Stage3Config()
+
+    candidates = sorted(
+        models.load_candidates(dedup_dir / "candidates.json"), key=lambda c: c.frame_index
+    )
+    if not candidates:
+        np.save(dedup_dir / "embeddings.npy", np.zeros((0, 0), dtype=np.float32))
+        return
+
+    model, processor = _load_model(config.checkpoint_id)
+    embeds = _embed_candidate_images(candidates, model, processor, config.batch_size)
+
+    # Overwrite with this exact sorted order -- embeddings.npy's row order
+    # must match candidates.json's on-disk order exactly (search_index()
+    # deliberately does NOT re-sort on load), so this is the one place that
+    # order is nailed down, regardless of what order dedup() happened to
+    # write in.
+    models.save_candidates(candidates, dedup_dir / "candidates.json")
+    np.save(dedup_dir / "embeddings.npy", embeds)
+
+
+def search_index(
+    index_dir: Path, out_dir: Path, query: str, config: Stage3Config | None = None
+) -> list[Candidate]:
+    """The cheap per-query lookup half of "build once, search many times":
+    loads a build_index() output, embeds ONLY the query text (near-instant --
+    the one unavoidable cost is loading the model itself, same as every other
+    stage 3 call), and re-ranks the cached embedding matrix via a pure numpy
+    dot product (both sides already L2-normalized, so dot product = cosine
+    similarity) -- never touches an image, never re-runs stage 1/2.
+    """
+    config = config or Stage3Config()
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    embeds_path = index_dir / "embeddings.npy"
+    if not embeds_path.exists():
+        raise FileNotFoundError(
+            f"{index_dir} has no embeddings.npy -- run `index`, not `dedup`/`extract` alone, "
+            "to build a searchable index first"
+        )
+
+    # Deliberately NOT re-sorted -- row-alignment with embeddings.npy depends
+    # on preserving build_index()'s on-disk order exactly (see its docstring).
+    candidates = models.load_candidates(index_dir / "candidates.json")
+    embeds = np.load(embeds_path)
+
+    if not candidates:
+        models.save_candidates([], out_dir / "candidates.json")
+        return []
+    if len(candidates) != embeds.shape[0]:
+        raise ValueError(
+            f"index corrupt or mismatched: {len(candidates)} candidates but "
+            f"{embeds.shape[0]} embedding rows in {index_dir}"
+        )
+
+    model, processor = _load_model(config.checkpoint_id)
+    query_embed = _embed_query(query, model, processor).float().cpu().numpy()
+    sims = (embeds @ query_embed.T).reshape(-1)
+    ranked = sorted(zip(candidates, sims.tolist()), key=lambda pair: pair[1], reverse=True)
 
     kept: list[Candidate] = []
     for candidate, score in ranked[: config.top_k]:

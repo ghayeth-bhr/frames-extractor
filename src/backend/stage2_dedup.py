@@ -38,12 +38,42 @@ def compute_phash(image: np.ndarray, hash_size: int = 8) -> imagehash.ImageHash:
     imagehash.phash converts to grayscale internally via PIL's .convert("L"),
     which assumes RGB channel order for its luma weights -- feeding it a raw
     BGR array would silently use the wrong per-channel weights.
+
+    EXPLORED AND REJECTED (OPTIMIZATION_PLAN.md Step 3): a cv2 resize-first
+    pipeline (resize the full-res BGR image down before any grayscale
+    conversion, avoiding PIL's full-resolution grayscale+resize, which
+    profiling found is 65% of this function's cost) is ~4.6x faster per hash
+    -- but is NOT bit-exact vs this PIL-based implementation. Validated
+    against every real comparison run3's actual dedup cascade made on its
+    full ~6444-candidate stage1 output (14645 real comparisons, not a
+    synthetic sample): 297 of the 5357 comparisons within +/-2 of
+    hamming_threshold flip decision in the DANGEROUS direction (a real
+    "keep both" becomes an incorrect merge, silently dropping a frame) --
+    roughly 1 in 20 real comparisons, not a rare tail case. This directly
+    violates SPEC.md's stated priority that over-merging is worse than
+    under-merging, so it was rejected. Do not revisit resize-first
+    preprocessing for speed without addressing this finding with real
+    numbers of your own -- it is not a re-derivation exercise, the numbers
+    above are from this project's actual footage.
     """
     rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     return imagehash.phash(Image.fromarray(rgb), hash_size=hash_size)
 
 
 def dedup(in_dir: Path, out_dir: Path, config: Stage2Config | None = None) -> list[Candidate]:
+    """A FAISS IndexBinaryIDMap replacement for this loop was also explored
+    (OPTIMIZATION_PLAN.md Step 3) -- structurally correct and behavior-
+    preserving (full test suite passed unchanged), but MEASURED SLOWER than
+    this plain loop (776.9s vs 279.1s on run3's ~6444-candidate stage1
+    output), because window_size defaults to 5 -- already cheap for a pure
+    Python comparison -- and FAISS's per-call binding overhead across 6444
+    individual range_search/add_with_ids calls, searching the whole growing
+    index rather than a truly bounded window, isn't amortized at this scale.
+    Reverted; the faiss dependency was removed. Don't reintroduce it here
+    without a design that keeps the index itself bounded to window_size
+    (this implementation searched the full growing index and post-filtered
+    in Python, which is what made it slower, not FAISS itself).
+    """
     config = config or Stage2Config()
     out_dir.mkdir(parents=True, exist_ok=True)
 

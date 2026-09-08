@@ -45,9 +45,21 @@ extract → dedup → rank → verify → review → export
 - **export.py** — writes `images/` + `_annotations.coco.json` in a
   Roboflow-importable layout (no annotations populated, no API upload).
 
-Shared modules: `models.py` (Frame/Candidate/VerifiedFrame/ReviewDecision
-dataclasses), `config.py` (all tunable thresholds, defaults biased toward
-recall), `io_utils.py` (video I/O, frame save/load, timestamp helpers).
+Shared modules: `models.py` (Frame/Candidate/VerifiedFrame/ReviewDecision/
+IndexedFrame dataclasses), `config.py` (all tunable thresholds, defaults
+biased toward recall), `io_utils.py` (video I/O, frame save/load, timestamp
+helpers).
+
+**Package layout**: the above all lives in `src/backend/` (renamed from
+`src/frames_extractor/` — the `frames_extractor` CLI command name is
+unchanged, it just points at `backend.cli:main` now). Two sibling
+top-level packages hold newer, separate concerns: `src/vectordb/`
+(`multi_source_index.py` — appendable multi-source embedding index,
+plain `candidates.json` + `embeddings.npy` on disk, not a real vector DB
+server) and `src/frontend/` (the FastAPI webapp — `app.py`/`storage.py`/
+`worker.py`). All three are one `uv`-managed project/venv, not separately
+installable packages — `vectordb`/`frontend` just import `backend`
+directly (e.g. `from backend import stage1_extract`).
 
 ### Cross-cutting decisions that shape every stage
 
@@ -68,6 +80,13 @@ recall), `io_utils.py` (video I/O, frame save/load, timestamp helpers).
   auto-discarded on VLM verification) — the pipeline's "time saved" story
   is the stage 1→3 funnel, not a smaller review set. Don't read this as
   underperformance when evaluating results.
+- **Stage 5 review MUST be performed by the human via the actual
+  interactive review tool (cv2 window, real keypresses), never
+  reconstructed or decided by Claude Code directly from
+  manifests/images — Claude Code has access to timestamps, similarity
+  scores, and ground-truth window locations that would bias any review
+  it performs itself.** If a stage 5 pass needs redoing, hand it back
+  to the human, don't fill it in programmatically even temporarily.
 
 ### Explicitly out of scope for v1
 
@@ -90,6 +109,17 @@ Use `uv` — activate `.venv` / run via `uv run` before running anything.
 Single consumer GPU available locally: NVIDIA GeForce RTX 4050, 6GB VRAM
 (driver 577.05, CUDA 12.9). SigLIP 2 batch sizes and checkpoint choice
 (`so400m` vs. `large-patch16` fallback) should be sized against this.
+
+### Running tests
+
+This machine's 6GB GPU cannot reliably sustain many sequential in-process
+SigLIP2 loads within one long-lived pytest session -- running all
+real-GPU-gated test files together in one `pytest -q` invocation has
+reproducibly hung inside `from_pretrained()`. Run GPU-gated test files
+individually or in small groups (confirmed reliable: `test_stage3_rank.py`
+alone, `test_multi_source_index.py` alone), not as a single full-suite
+sweep. This is a hardware constraint, not a bug -- don't attempt to "fix"
+it by retrying the combined run.
 
 ### Intermediate output
 

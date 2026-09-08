@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from frames_extractor.config import PipelineConfig
-from frames_extractor.stage1_extract import Stage1Config
-from frames_extractor.stage2_dedup import Stage2Config
-from frames_extractor.stage3_rank import Stage3Config
-from frames_extractor.stage4_verify import Stage4Config
-from frames_extractor.stage5_review import Stage5Config
+from backend.config import PipelineConfig
+from backend.stage1_extract import Stage1Config
+from backend.stage2_dedup import Stage2Config
+from backend.stage3_rank import Stage3Config
+from backend.stage4_verify import Stage4Config
+from backend.stage5_review import Stage5Config
 
 
 def test_pipeline_config_default_aggregation():

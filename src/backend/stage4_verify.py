@@ -51,6 +51,7 @@ class Stage4Config:
     # AND for stage 4's own recall/precision consistency across repeated pipeline runs
     keep_alive: str = "10m"  # refreshed every request -- bridges inter-frame gaps, not a batch budget
     timeout_sec: float = 60.0
+    skip: bool = False  # --skip-vlm: no Ollama calls at all, every candidate gets verdict="skipped"
 
 
 def _check_ollama_reachable(base_url: str) -> None:
@@ -140,7 +141,8 @@ def _verify_frame(
 def verify(in_dir: Path, out_dir: Path, query: str, config: Stage4Config | None = None) -> list[VerifiedFrame]:
     config = config or Stage4Config()
     out_dir.mkdir(parents=True, exist_ok=True)
-    _check_ollama_reachable(config.base_url)  # once, up front, before any frame processing
+    if not config.skip:
+        _check_ollama_reachable(config.base_url)  # once, up front, before any frame processing
 
     candidates = sorted(models.load_candidates(in_dir / "candidates.json"), key=lambda c: c.frame_index)
 
@@ -148,7 +150,11 @@ def verify(in_dir: Path, out_dir: Path, query: str, config: Stage4Config | None 
     verified_by_index: dict[int, VerifiedFrame] = {}
     if manifest_path.exists():
         for vf in models.load_verified_frames(manifest_path):
-            if vf.verdict != "error":  # only successful verdicts count as "already done"
+            # "error" and "skipped" both mean no real judgment was ever made --
+            # neither counts as "already done", so a later real (non-skip)
+            # rerun retries anything cached as "skipped" the same way it
+            # already retries "error".
+            if vf.verdict not in ("error", "skipped"):
                 verified_by_index[vf.frame_index] = vf
 
     for candidate in candidates:
@@ -159,8 +165,11 @@ def verify(in_dir: Path, out_dir: Path, query: str, config: Stage4Config | None 
         if not dest_path.exists():
             shutil.copy2(candidate.image_path, dest_path)
 
-        image = io_utils.load_frame_image(candidate.image_path)
-        verdict, reasoning, confidence = _verify_frame(image, query, config)
+        if config.skip:
+            verdict, reasoning, confidence = "skipped", "VLM stage skipped by user config (--skip-vlm)", None
+        else:
+            image = io_utils.load_frame_image(candidate.image_path)
+            verdict, reasoning, confidence = _verify_frame(image, query, config)
 
         verified_by_index[candidate.frame_index] = VerifiedFrame(
             frame_index=candidate.frame_index,

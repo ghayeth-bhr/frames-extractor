@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>frames-extractor</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="container">
+  <h1>Assets</h1>
+
+  <div class="panel">
+    <h2>Create new asset</h2>
+    <form id="create-asset-form">
+      <div class="field">
+        <label for="asset-name">Name</label>
+        <input type="text" id="asset-name" name="name" required placeholder="e.g. coffee shop cam 3">
+      </div>
+      <button type="submit">Create</button>
+    </form>
+  </div>
+
+  <div class="panel">
+    <h2>Existing assets</h2>
+    <div class="asset-grid" id="asset-list"></div>
+    <div class="empty-state" id="asset-empty" style="display:none;">No assets yet -- create one above.</div>
+  </div>
+</div>
+
+<script src="/static/index.js"></script>
+</body>
+</html>
